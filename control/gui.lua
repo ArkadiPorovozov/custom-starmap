@@ -39,7 +39,7 @@ function find_hovered_platform_slot(player, cursor_pos)
   local best, best_d2 = nil, nil
   for _, b in ipairs(storage.planets) do
     if b.platform_slots and b.position then
-      local dist = (b.icon_radius or 1) + PLATFORM_GAP
+      local dist = platform_slot_dist(b)
       for i, slot in ipairs(b.platform_slots) do
         local px = b.position.x + math.cos(slot.angle) * dist
         local py = b.position.y + math.sin(slot.angle) * dist
@@ -82,7 +82,7 @@ local PLATFORM_CAM_FRAME = "custom-se-platform-cam"
 
 -- Мировая позиция слота платформы (тело крутится — слот тоже)
 local function platform_slot_world_pos(body, slot)
-  local dist = (body.icon_radius or 1) + PLATFORM_GAP
+  local dist = platform_slot_dist(body)
   return body.position.x + math.cos(slot.angle) * dist,
          body.position.y + math.sin(slot.angle) * dist
 end
@@ -102,20 +102,38 @@ local function world_to_screen(player, wx, wy)
   return sx, sy
 end
 
--- Окошко камеры РЯДОМ С КУРСОРОМ (т.е. рядом с маркером, который под курсором),
--- с оффсетом и без выхода за край экрана.
-local function place_camera_frame_at_cursor(player, frame, hit)
-  if not (frame and frame.valid and hit and hit.body and hit.body.position) then return end
-  local wx, wy = platform_slot_world_pos(hit.body, hit.slot)
+-- Универсально: поставить окно рядом с мировой точкой (там, где курсор),
+-- с оффсетом и без выхода за край экрана. w/h — примерные габариты окна.
+local function place_frame_near(player, frame, wx, wy, w, h, off_x, off_y)
+  if not (frame and frame.valid) then return end
   local sx, sy = world_to_screen(player, wx, wy)
   local res = player.display_resolution
   local scale = player.display_scale or 1
   if scale <= 0 then scale = 1 end
-  local max_x = res.width  / scale - (PLATFORM_CAMERA_W + 36)
-  local max_y = res.height / scale - (PLATFORM_CAMERA_H + 60)
-  local lx = math.max(4, math.min(sx + PLATFORM_CAMERA_OFFSET_X, max_x))
-  local ly = math.max(4, math.min(sy + PLATFORM_CAMERA_OFFSET_Y, max_y))
+  local lx = math.max(4, math.min(sx + off_x, res.width  / scale - (w + 14)))
+  local ly = math.max(4, math.min(sy + off_y, res.height / scale - (h + 14)))
   pcall(function() frame.location = {x = lx, y = ly} end)
+end
+
+-- Окошко камеры РЯДОМ С КУРСОРОМ (т.е. рядом с маркером, который под курсором)
+local function place_camera_frame_at_cursor(player, frame, hit)
+  if not (hit and hit.body and hit.body.position) then return end
+  local wx, wy = platform_slot_world_pos(hit.body, hit.slot)
+  place_frame_near(player, frame, wx, wy,
+    PLATFORM_CAMERA_W + 20, PLATFORM_CAMERA_H + 44,
+    PLATFORM_CAMERA_OFFSET_X, PLATFORM_CAMERA_OFFSET_Y)
+end
+
+-- Снять ванильное выделение (зелёную selection-рамку и тултип).
+-- Рамку прототипом не отключить (в API такого флага нет), поэтому каждый тик
+-- сбрасываем player.selected ДО рендера кадра — движку рисовать нечего.
+local function deselect_if_marker(player, names)
+  pcall(function()
+    local s = player.selected
+    if s and s.valid and names[s.name] then
+      player.clear_selected_entity()
+    end
+  end)
 end
 
 function close_platform_camera(player)
@@ -136,6 +154,9 @@ function update_platform_camera(player)
   end
   local key = hit and (hit.slot.force .. ":" .. tostring(hit.slot.index)) or nil
   local cur = storage.platform_camera[player.index]
+
+  -- маркер платформы под курсором: своё окно есть -> ванильную рамку снимаем
+  if hit then deselect_if_marker(player, {["custom-se-platform-marker"] = true}) end
 
   -- та же платформа — подправить вид камеры и позицию окна за курсором
   if cur and cur.key == key then
@@ -190,6 +211,102 @@ function update_platform_camera(player)
     place_camera_frame_at_cursor(player, frame, hit)
     storage.platform_camera[player.index] = {key = key, force = hit.slot.force, index = hit.slot.index}
   end
+end
+
+-- --- Инфо-окно планеты при наведении (своё, как ванильный тултип) ---
+-- Маркер остаётся кликабельным/наводимым; зелёную обводку гасим снятием выделения.
+local PLANET_INFO_FRAME = "custom-se-planet-info"
+
+function close_planet_info(player)
+  local frame = player.gui.screen[PLANET_INFO_FRAME]
+  if frame and frame.valid then frame.destroy() end
+  storage.planet_info = storage.planet_info or {}
+  storage.planet_info[player.index] = nil
+end
+
+-- Тело по наведённому маркеру: имя 'custom-se-marker-<proto>' -> proto,
+-- либо базовый запасной маркер -> ближайшее тело по позиции
+local function body_of_marker(sel)
+  local pname = string.match(sel.name or "", "^custom%-se%-marker%-(.+)$")
+  if pname and storage.planet_by_name then
+    return storage.planet_by_name[pname]
+  end
+  if sel.name == "custom-se-planet-marker" and sel.position then
+    local best, best_d2 = nil, nil
+    for _, b in ipairs(storage.planets or {}) do
+      if b.position then
+        local dx, dy = b.position.x - sel.position.x, b.position.y - sel.position.y
+        local d2 = dx * dx + dy * dy
+        local cap = (b.icon_radius or 1) + 0.6
+        if d2 <= cap * cap and (not best_d2 or d2 < best_d2) then
+          best, best_d2 = b, d2
+        end
+      end
+    end
+    return best
+  end
+  return nil
+end
+
+function update_planet_info(player)
+  if not (player and player.valid) then return end
+  storage.planet_info = storage.planet_info or {}
+
+  local sel = nil
+  if player.surface and player.surface.name == SURFACE_NAME then
+    local ok, s = pcall(function() return player.selected end)
+    if ok then sel = s end
+  end
+
+  local body = nil
+  if sel and sel.valid and sel.name ~= "custom-se-platform-marker" then
+    body = body_of_marker(sel)
+  end
+
+  local key = body and body.prototype_name or nil
+  local cur = storage.planet_info[player.index]
+
+  -- та же планета: окно двигаем за курсором, выделение снято
+  if cur and cur.key == key then
+    if game.tick % 3 == 0 and body.position then
+      local frame = player.gui.screen[PLANET_INFO_FRAME]
+      place_frame_near(player, frame, body.position.x, body.position.y,
+        280, 230, PLANET_INFO_OFFSET_X, PLANET_INFO_OFFSET_Y)
+    end
+    if sel and sel.valid then pcall(function() player.clear_selected_entity() end) end
+    return
+  end
+
+  if cur then close_planet_info(player) end
+  if not body then return end
+
+  local frame = nil
+  pcall(function()
+    frame = player.gui.screen.add{
+      type = "frame",
+      name = PLANET_INFO_FRAME,
+      direction = "vertical",
+      caption = {"", starmap_body_localised_name(body.prototype_name)}
+    }
+    -- тот же набор данных, что в ванильном описании маркера:
+    -- свойства поверхности + ресурсы (иконки item/fluid/entity)
+    local lbl = frame.add{
+      type = "label",
+      name = "info_text",
+      caption = build_card_text(body.prototype_name)
+    }
+    lbl.style.single_line = false
+    lbl.style.maximal_width = 340
+  end)
+  if frame and frame.valid then
+    storage.planet_info[player.index] = {key = key}
+    if body.position then
+      place_frame_near(player, frame, body.position.x, body.position.y,
+        280, 230, PLANET_INFO_OFFSET_X, PLANET_INFO_OFFSET_Y)
+    end
+  end
+  -- зелёную обводку и ванильный тултип убираем сразу
+  if sel and sel.valid then pcall(function() player.clear_selected_entity() end) end
 end
 
 function toggle_info_cards(player)
@@ -283,7 +400,7 @@ function handle_planet_click(player, cursor_pos)
         local dx = planet.position.x - cx
         local dy = planet.position.y - cy
         local d = math.sqrt(dx * dx + dy * dy)
-        local capture = (planet.icon_radius or 1) + 0.5
+        local capture = (planet.icon_radius or 1) + 0.25
         if d <= capture then
           local score = d - capture
           if not best_score or score < best_score then
@@ -305,7 +422,7 @@ function handle_planet_click(player, cursor_pos)
         local dx = planet.position.x - px
         local dy = planet.position.y - py
         local d = math.sqrt(dx * dx + dy * dy)
-        local capture = (planet.icon_radius or 1) + 0.6
+        local capture = (planet.icon_radius or 1) + 0.35
         if d <= capture then
           local score = d - capture
           if not best_score or score < best_score then

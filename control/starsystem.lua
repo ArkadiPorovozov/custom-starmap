@@ -525,13 +525,13 @@ function rebuild_star_system()
       -- Спрайт планеты (НИКАКИХ cover-кругов!) — не зависит от наличия прототипа
       b.sprite_id = draw_planet_sprite(surface, b.prototype_name, b.position, b.icon_radius, b.angle)
 
-      -- Подпись (нужен прототип для localised_name)
+      -- Подпись СНИЗУ под иконкой (нужен прототип для localised_name)
       if proto then
         local ok_t, tobj = pcall(function()
           return rendering.draw_text{
             text = proto.localised_name or {"space-location-name." .. b.prototype_name},
             surface = surface,
-            target = {x = b.position.x, y = b.position.y - (b.icon_radius + 1.2)},
+            target = {x = b.position.x, y = b.position.y + (b.icon_radius + 0.9)},
             color = {r = 1, g = 1, b = 1, a = 0.95},
             scale = 0.8,
             alignment = "center"
@@ -656,7 +656,7 @@ function refresh_platform_marks()
       p.platform_label_ids = {}
       p.platform_slots = {}
       p.platform_sprite_mode = sprite_ok
-      local dist = (p.icon_radius or 1) + PLATFORM_GAP
+      local dist = platform_slot_dist(p)
       local step = PLATFORM_SLOT_ARC / math.max(dist, 0.5)
       for i, plat in ipairs(list) do
         local ang = PLATFORM_SLOT_START + (i - 1) * step
@@ -670,7 +670,8 @@ function refresh_platform_marks()
         if sprite_ok then
           ok, obj = pcall(function()
             return rendering.draw_sprite{
-              sprite = "custom-se-starmap-platform-" .. ((i - 1) % 3 + 1),
+              -- всегда ОДИН кадр из трёх (это лист moving-states, для стоянки — кадр 1)
+              sprite = "custom-se-starmap-platform-" .. PLATFORM_SPRITE_FRAME,
               target = {x = cx, y = cy},
               surface = surface,
               x_scale = (PLATFORM_SIZE * 32) / 54,

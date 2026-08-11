@@ -54,9 +54,11 @@ script.on_event(defines.events.on_tick, function(e)
   end
   -- рендер двигаем КАЖДЫЙ тик — иначе планеты и орбиты лун идут рывками
   update_orbits()
-  -- камера предпросмотра платформы при наведении курсора (как в ванили)
+  -- камера предпросмотра платформы и инфо-окно планеты при наведении
+  -- (оба снимают player.selected -> зелёной selection-рамки нет)
   for _, p in pairs(game.players) do
     pcall(update_platform_camera, p)
+    pcall(update_planet_info, p)
   end
   if e.tick % 30 == 0 then
     for _, p in pairs(game.players) do update_player_view_settings(p) end

@@ -229,8 +229,9 @@ local function marker_half_size(name, proto)
   else
     size = MARKER_PLANET_SIZE_BASE * mag + MARKER_PLANET_SIZE_BONUS
   end
-  -- хитбокс ПОЧТИ по размеру иконки (было +0.3 — игроки жаловались на большую рамку)
-  return math.max(0.3, size) + 0.1
+  -- хитбокс ВПЛОТНУЮ к иконке (ещё уменьшен по запросу; позиция синхронна
+  -- с иконкой каждый тик — см. move_markers в control/orbits.lua)
+  return math.max(0.2, size) * 0.6 + 0.05
 end
 
 -- Маркеры: пустая картинка (иконка рисуется отдельным рендером в control),

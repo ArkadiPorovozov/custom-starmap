@@ -44,7 +44,8 @@ function update_orbits()
     -- Двигаем только открытые тела (у скрытых рендера нет)
     if planet.discovered then
       r_set_target(planet.sprite_id, {x = x, y = y})
-      r_set_target(planet.name_text_id, {x = x, y = y - (planet.icon_radius or 1) - 1.2})
+      -- подпись СНИЗУ под иконкой
+      r_set_target(planet.name_text_id, {x = x, y = y + (planet.icon_radius or 1) + 0.9})
 
       local sprite = r_obj(planet.sprite_id)
       if sprite then
@@ -83,7 +84,7 @@ function update_orbits()
 
       -- Маркеры платформ и их подписи следуют за планетой (углы — из слотов)
       if planet.platform_render_ids then
-        local dist = (planet.icon_radius or 1) + PLATFORM_GAP
+        local dist = platform_slot_dist(planet)
         for idx, pid in ipairs(planet.platform_render_ids) do
           local slot = planet.platform_slots and planet.platform_slots[idx]
           local ang = (slot and slot.angle) or 0
@@ -117,11 +118,9 @@ function update_orbits()
     end
   end
 
-  -- Маркеры-сущности двигаем с троттлингом (раз в 5 тиков):
-  -- у simple-entity нет unit_number, поэтому ищем их по имени+позиции.
-  if game.tick % 5 == 0 then
-    move_markers(surface)
-  end
+  -- Маркеры-сущности — КАЖДЫЙ тик: иначе хитбоксы/селекшены отстают от иконок.
+  -- (иконка-рендер едет каждый тик, а маркер раз в 5 тиков — отсюда "отставание")
+  move_markers(surface)
 end
 
 -- Двигает маркеры-сущности вслед за иконками планет (поиск по имени + ближайшей позиции)
@@ -146,7 +145,7 @@ function move_markers(surface)
 
       -- Маркеры платформ (кликабельные сущности у слотов) едут за планетой
       if planet.platform_slots then
-        local dist = (planet.icon_radius or 1) + PLATFORM_GAP
+        local dist = platform_slot_dist(planet)
         for _, slot in ipairs(planet.platform_slots) do
           local tx = planet.position.x + math.cos(slot.angle) * dist
           local ty = planet.position.y + math.sin(slot.angle) * dist

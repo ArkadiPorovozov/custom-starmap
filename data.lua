@@ -66,7 +66,7 @@ data:extend({
       "not-repairable"
     },
     collision_box = {{-0.1, -0.1}, {0.1, 0.1}},
-    selection_box = {{-0.5, -0.5}, {0.5, 0.5}}, -- компактный фоллбэк (основные — клоны по размеру планеты)
+    selection_box = {{-0.3, -0.3}, {0.3, 0.3}}, -- компактный фоллбэк (основные — клоны по размеру планеты)
     collision_mask = {layers = {}},
     selectable_in_game = true,
     max_health = 10000000,

@@ -40,3 +40,14 @@ function r_move_back(obj)
   local o = r_obj(obj)
   if o then pcall(function() o.move_to_back() end) end
 end
+
+-- === Геометрия слотов платформ (ЕДИНАЯ формула для всех модулей!) ===
+-- Зазор от края иконки до маркера зависит от размера планеты.
+function platform_gap_for(icon_radius)
+  return math.max(PLATFORM_GAP, (icon_radius or 1) * PLATFORM_GAP_SCALE)
+end
+
+-- Дистанция от центра планеты до центра маркера платформы
+function platform_slot_dist(body)
+  return (body.icon_radius or 1) + platform_gap_for(body.icon_radius)
+end
