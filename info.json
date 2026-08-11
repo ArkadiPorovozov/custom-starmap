@@ -1,0 +1,14 @@
+{
+  "name": "custom-starmap",
+  "version": "0.1.0",
+  "title": "Custom Starmap (SE Style for Factorio 2.1 + SA)",
+  "author": "Custom Dev",
+  "contact": "",
+  "homepage": "",
+  "factorio_version": "2.1",
+  "dependencies": [
+    "base >= 2.0.0",
+    "space-age >= 2.0.0"
+  ],
+  "description": "Заменяет стандартную ванильную космическую карту Space Age на кастомное GUI звездной системы в стиле Space Exploration. Скрывает ванильную карту и отображает собственную систему со звездой и орбитами."
+}
