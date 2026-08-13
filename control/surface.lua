@@ -1,9 +1,25 @@
 -- control/surface.lua
--- 1000x1000 empty-space, out-of-map по краям, всегда прогружена как радаром
+-- Поверхность карты: 1000x1000 empty-space, out-of-map за пределами, полный чарт.
+
+-- Параметры среды: полдень (daytime 0; 0.5 = полночь), freeze_daytime,
+-- без облаков. Идемпотентно — вызывается из get_or_create_surface().
+function apply_starmap_environment(surface)
+  if not (surface and surface.valid) then return end
+  pcall(function()
+    surface.freeze_daytime = true
+    surface.daytime = 0
+    surface.min_brightness = 1.0
+    surface.show_clouds = false
+    surface.brightness_visual_weights = {r = 1, g = 1, b = 1}
+  end)
+end
 
 function get_or_create_surface()
   local surface = game.surfaces[SURFACE_NAME]
-  if surface and surface.valid then return surface end
+  if surface and surface.valid then
+    apply_starmap_environment(surface)
+    return surface
+  end
 
   local mgs = {
     width = 1000,
@@ -20,13 +36,7 @@ function get_or_create_surface()
 
   surface = game.create_surface(SURFACE_NAME, mgs)
   if surface then
-    pcall(function()
-      surface.freeze_daytime = true
-      surface.daytime = 0.5 -- вечный день
-      surface.brightness_visual_weights = {r = 1, g = 1, b = 1}
-      surface.min_brightness = 1.0
-      surface.show_clouds = false
-    end)
+    apply_starmap_environment(surface)
     chart_surface_as_radar(surface)
   end
   return surface
@@ -34,7 +44,7 @@ end
 
 function chart_surface_as_radar(surface)
   if not surface or not surface.valid then return end
-  -- 1000 тайлов = ~32 чанка в каждую сторону (500/32 ~= 15.6)
+  -- 500 тайлов = ~16 чанков в каждую сторону
   local chunk_radius = math.ceil(MAP_LIMIT / 32) + 1
   for cx = -chunk_radius, chunk_radius do
     for cy = -chunk_radius, chunk_radius do
@@ -45,7 +55,7 @@ function chart_surface_as_radar(surface)
   end
   pcall(function() surface.force_generate_chunk_requests() end)
 
-  -- Чарт как радаром для всех сил
+  -- чарт для всех сил
   for _, force in pairs(game.forces) do
     if force and force.valid then
       pcall(function()
@@ -62,10 +72,10 @@ function on_chunk_generated(event)
   local tiles = {}
   local need = false
 
-  -- безопасная проверка кастомного тайла
+  -- кастомный тайл может отсутствовать (прототип не создан) — fallback empty-space
   local custom_tile_exists = false
   do
-    local ok, t = pcall(function() return prototypes.tile["custom-se-empty-space-no-correct"] end)
+    local ok, t = pcall(function() return prototypes.tile["space-map-rework-empty-space-no-correct"] end)
     custom_tile_exists = ok and t ~= nil
   end
 
@@ -78,7 +88,7 @@ function on_chunk_generated(event)
         local ct = surface.get_tile(x, y)
         if ct.valid and ct.name ~= "empty-space" then
           local tn = "empty-space"
-          if custom_tile_exists then tn = "custom-se-empty-space-no-correct" end
+          if custom_tile_exists then tn = "space-map-rework-empty-space-no-correct" end
           table.insert(tiles, {name = tn, position = {x, y}})
           need = true
         end
@@ -89,12 +99,15 @@ function on_chunk_generated(event)
     pcall(function() surface.set_tiles(tiles, false, false) end)
   end
 
-  -- Чистим мусор: всё, кроме маркеров планет и персонажей игроков
+  -- Удаление всех сущностей, кроме маркеров и персонажей игроков.
   local ents = surface.find_entities_filtered({area = area})
   for _, e in ipairs(ents) do
     if e.valid and e.type ~= "character" then
       local n = e.name or ""
-      if n ~= "custom-se-planet-marker" and not string.find(n, "^custom%-se%-marker%-") then
+      if n ~= "space-map-rework-planet-marker"
+         and n ~= "space-map-rework-platform-marker"
+         and n ~= "space-map-rework-travel-marker"
+         and not string.find(n, "^space%-map%-rework%-marker%-") then
         pcall(function() e.destroy() end)
       end
     end

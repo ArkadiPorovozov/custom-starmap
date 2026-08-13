@@ -1,6 +1,6 @@
 -- control/orbits.lua
--- Медленное вращение: планеты вокруг звезды, луны вокруг родителя.
--- cover_id удалён. Все рендер-объекты - по id (storage-safe).
+-- Орбитальное движение: планеты вокруг звезды, луны вокруг родителя.
+-- Все рендер-объекты адресуются по id (storage-safe).
 
 function update_orbits()
   local surface = game.surfaces[SURFACE_NAME]
@@ -11,20 +11,23 @@ function update_orbits()
     if planet.parent_name then
       speed = MOON_ORBITAL_SPEED
     else
-      -- Модификатор скорости по расстоянию от звезды (псевдо-Кеплер):
-      -- ближе к звезде — быстрее, дальше — медленнее.
+      -- Псевдо-Кеплер: линейная скорость ~ r^(-ORBIT_SPEED_KEPLER),
+      -- нормированная на ORBIT_SPEED_REF_RADIUS.
       local r = planet.orbit_radius or 1
       if r < 1 then r = 1 end
       speed = ORBITAL_SPEED * (ORBIT_SPEED_REF_RADIUS / r) ^ ORBIT_SPEED_KEPLER
     end
-    planet.angle = planet.angle + speed
-    if planet.angle > math.pi * 2 then planet.angle = planet.angle - math.pi * 2 end
+    -- ORBITS_ENABLED=false: позиции не пересчитываются.
+    if ORBITS_ENABLED ~= false then
+      planet.angle = planet.angle + speed
+      if planet.angle > math.pi * 2 then planet.angle = planet.angle - math.pi * 2 end
+    end
 
     local x, y
     if planet.parent_name then
       local parent = storage.planet_by_name and storage.planet_by_name[planet.parent_name]
       if parent and parent.position then
-        -- орбита луны следует за родителем
+        -- орбита луны центрируется на родителе
         if planet.orbit_id then
           r_set_target(planet.orbit_id, {x = parent.position.x, y = parent.position.y})
           r_move_back(planet.orbit_id)
@@ -41,18 +44,29 @@ function update_orbits()
     end
     planet.position = {x = x, y = y}
 
-    -- Двигаем только открытые тела (у скрытых рендера нет)
+    -- Рендер есть только у открытых тел.
     if planet.discovered then
       r_set_target(planet.sprite_id, {x = x, y = y})
-      -- подпись СНИЗУ под иконкой
-      r_set_target(planet.name_text_id, {x = x, y = y + (planet.icon_radius or 1) + 0.9})
+      -- обводка исследованного тела следует за иконкой
+      r_set_target(planet.ring_id, {x = x, y = y})
+      -- подпись под иконкой
+      r_set_target(planet.name_text_id, {x = x, y = y + (planet.icon_radius or 1) + planet_name_gap(planet.icon_radius)})
 
       local sprite = r_obj(planet.sprite_id)
       if sprite then
-        pcall(function() sprite.orientation = (planet.angle / (2 * math.pi)) % 1 end)
+        if planet.parent_name then
+          -- луна: собственное вращение спрайта независимо от орбитального угла
+          planet.self_angle = (planet.self_angle or planet.angle) + MOON_SELF_SPIN_SPEED
+          if planet.self_angle > math.pi * 2 then planet.self_angle = planet.self_angle - math.pi * 2 end
+          pcall(function() sprite.orientation = (planet.self_angle / (2 * math.pi)) % 1 end)
+        else
+          -- планета: orientation синхронно орбитальному углу
+          pcall(function() sprite.orientation = (planet.angle / (2 * math.pi)) % 1 end)
+        end
       end
 
-      -- Карточки характеристик
+      -- Карточка характеристик: пересоздаётся при смене стороны от центра
+      -- (выравнивание текста left/right зависит от стороны).
       if planet.card_render_id and r_valid(planet.card_render_id) then
         local offset_x = (x >= 0) and 5 or -5
         local current_side = (x >= 0) and "right" or "left"
@@ -90,18 +104,16 @@ function update_orbits()
           local ang = (slot and slot.angle) or 0
           local ux, uy = math.cos(ang), math.sin(ang)
           if planet.platform_sprite_mode then
-            -- ванильный спрайт: просто двигаем target
             r_set_target(pid, {x = x + ux * dist, y = y + uy * dist})
             r_bring_front(pid)
           else
-            -- polygon-fallback: пересчитываем вершины
+            -- polygon-fallback: пересчёт вершин
             local po = r_obj(pid)
             if po then
               local verts = platform_triangle_verts({x = x, y = y}, ang, dist, PLATFORM_SIZE, PLATFORM_HALF_WIDTH)
               pcall(function() po.vertices = verts end)
             end
           end
-          -- подпись под углом следует за маркером
           local lid = planet.platform_label_ids and planet.platform_label_ids[idx]
           if lid then
             r_set_target(lid, {x = x + ux * (dist + PLATFORM_LABEL_GAP), y = y + uy * (dist + PLATFORM_LABEL_GAP)})
@@ -110,7 +122,7 @@ function update_orbits()
         end
       end
 
-      -- z-order: орбита сзади, иконка и подпись спереди
+      -- z-order: орбита позади, иконка и подписи спереди
       r_move_back(planet.orbit_id)
       r_bring_front(planet.sprite_id)
       r_bring_front(planet.name_text_id)
@@ -118,12 +130,12 @@ function update_orbits()
     end
   end
 
-  -- Маркеры-сущности — КАЖДЫЙ тик: иначе хитбоксы/селекшены отстают от иконок.
-  -- (иконка-рендер едет каждый тик, а маркер раз в 5 тиков — отсюда "отставание")
+  -- Маркеры-сущности синхронизируются каждый тик (хитбоксы следуют за иконками).
   move_markers(surface)
 end
 
--- Двигает маркеры-сущности вслед за иконками планет (поиск по имени + ближайшей позиции)
+-- Перемещение маркеров-сущностей вслед за иконками планет
+-- (поиск по имени прототипа, из кандидатов — ближайший к целевой позиции).
 function move_markers(surface)
   if not storage.planets then return end
   for _, planet in ipairs(storage.planets) do
@@ -143,7 +155,7 @@ function move_markers(surface)
         end
       end
 
-      -- Маркеры платформ (кликабельные сущности у слотов) едут за планетой
+      -- Маркеры платформ (кликабельные сущности у слотов)
       if planet.platform_slots then
         local dist = platform_slot_dist(planet)
         for _, slot in ipairs(planet.platform_slots) do
@@ -151,13 +163,13 @@ function move_markers(surface)
           local ty = planet.position.y + math.sin(slot.angle) * dist
           local ok2, found2 = pcall(function()
             return surface.find_entities_filtered{
-              name = "custom-se-platform-marker",
+              name = "space-map-rework-platform-marker",
               position = {x = tx, y = ty},
               radius = PLATFORM_MARKER_HALF + 1.2
             }
           end)
           if ok2 and found2 then
-            -- берём БЛИЖАЙШИЙ маркер к слоту (соседние слоты не перехватываются)
+            -- ближайший маркер к слоту
             local best_e, best_d2 = nil, nil
             for _, e in ipairs(found2) do
               if e.valid then
@@ -173,6 +185,8 @@ function move_markers(surface)
               pcall(function() best_e.teleport({x = tx, y = ty}) end)
             end
           end
+          -- маркер один на тело (все слоты делят позицию) — хватит первого
+          break
         end
       end
     end

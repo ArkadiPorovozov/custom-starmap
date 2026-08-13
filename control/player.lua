@@ -1,5 +1,5 @@
 -- control/player.lua
--- Скрытие только хотбара, телепорт, дебаг показаний
+-- Вид игрока (скрытие quickbar на карте), телепорт на карту и обратно, отладочный вывод.
 
 function update_player_view_settings(player)
   if not player or not player.valid then return end
@@ -29,6 +29,7 @@ function teleport_to_starmap(player, return_if_already)
   if not storage.planets or #storage.planets == 0 then rebuild_star_system() end
   storage.player_prev = storage.player_prev or {}
 
+  -- возврат на предыдущую поверхность (иначе — fallback на nauvis)
   if player.surface.name == SURFACE_NAME and return_if_already then
     local prev = storage.player_prev[player.index]
     if prev and prev.surface and game.surfaces[prev.surface] then
@@ -38,14 +39,14 @@ function teleport_to_starmap(player, return_if_already)
         pcall(function() player.set_controller{type = defines.controllers.character, character = player.character} end)
         if player.character then player.teleport(prev.position, game.surfaces[prev.surface]) end
       end
-      player.print({"", "[custom-se-starmap] Возврат на ", prev.surface})
+      player.print({"", "[space-map-rework] Возврат на ", prev.surface})
       update_player_view_settings(player)
       return
     else
       local nauvis = game.surfaces["nauvis"]
       if nauvis then
         player.teleport({0, 0}, nauvis)
-        player.print("[custom-se-starmap] Возврат на Nauvis")
+        player.print("[space-map-rework] Возврат на Nauvis")
       end
       update_player_view_settings(player)
       return
@@ -78,9 +79,9 @@ function teleport_to_starmap(player, return_if_already)
   end
 
   pcall(function() player.game_view_settings.show_quickbar = false end)
-  player.print("[custom-se-starmap] Калидус Sol — SHIFT+M возврат, SHIFT+I инфо, ПКМ → Remote View")
+  player.print("[space-map-rework] Калидус Sol — SHIFT+M возврат, SHIFT+I инфо, ПКМ → Remote View")
 
-  -- ДЕБАГ: показания планет и расстояния + привязка
+  -- Отладка: список тел с дистанциями и привязкой к родителю.
   if storage.planets then
     player.print("[DEBUG] Всего тел: " .. #storage.planets
       .. " | STAR_SCALE=" .. tostring(STAR_DISTANCE_SCALE)

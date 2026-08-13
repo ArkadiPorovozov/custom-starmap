@@ -1,13 +1,12 @@
 -- settings.lua
--- ВНИМАНИЕ: сейчас это АРХИВ. Рабочие значения живут в control/constants.lua —
--- константы в приоритете, потому что startup-настройки фиксируются в сохранении
--- и не меняются после правки дефолтов. Файл оставлен, чтобы старые сейвы грузились
--- без ошибок миграции настроек.
+-- АРХИВ. Рабочие значения — в control/constants.lua: startup-настройки
+-- фиксируются в сохранении и не обновляются при правке дефолтов.
+-- Файл сохранён для загрузки старых сейвов без миграций настроек.
 data:extend({
   -- Масштаб орбит
   {
     type = "double-setting",
-    name = "custom-se-starmap-star-scale",
+    name = "space-map-rework-star-scale",
     setting_type = "startup",
     default_value = 1.0,
     minimum_value = 0.1,
@@ -18,7 +17,7 @@ data:extend({
   },
   {
     type = "double-setting",
-    name = "custom-se-starmap-sat-scale",
+    name = "space-map-rework-sat-scale",
     setting_type = "startup",
     default_value = 1.0,
     minimum_value = 0.1,
@@ -29,7 +28,7 @@ data:extend({
   },
   {
     type = "double-setting",
-    name = "custom-se-starmap-distance-bonus",
+    name = "space-map-rework-distance-bonus",
     setting_type = "startup",
     default_value = 10,
     minimum_value = 0,
@@ -40,7 +39,7 @@ data:extend({
   },
   {
     type = "double-setting",
-    name = "custom-se-starmap-star-distance-bonus",
+    name = "space-map-rework-star-distance-bonus",
     setting_type = "startup",
     default_value = 10,
     minimum_value = 0,
@@ -51,7 +50,7 @@ data:extend({
   },
   {
     type = "double-setting",
-    name = "custom-se-starmap-sat-distance-bonus",
+    name = "space-map-rework-sat-distance-bonus",
     setting_type = "startup",
     default_value = 0,
     minimum_value = 0,
@@ -63,7 +62,7 @@ data:extend({
   -- Размер иконок
   {
     type = "double-setting",
-    name = "custom-se-starmap-planet-size",
+    name = "space-map-rework-planet-size",
     setting_type = "startup",
     default_value = 0.6,
     minimum_value = 0.1,
@@ -74,7 +73,7 @@ data:extend({
   },
   {
     type = "double-setting",
-    name = "custom-se-starmap-planet-size-bonus",
+    name = "space-map-rework-planet-size-bonus",
     setting_type = "startup",
     default_value = 0.5,
     minimum_value = 0,
@@ -85,7 +84,7 @@ data:extend({
   },
   {
     type = "double-setting",
-    name = "custom-se-starmap-sat-size-bonus",
+    name = "space-map-rework-sat-size-bonus",
     setting_type = "startup",
     default_value = 0.3,
     minimum_value = 0,
@@ -97,7 +96,7 @@ data:extend({
   -- Множители лун: размер и орбиты
   {
     type = "double-setting",
-    name = "custom-se-starmap-moon-size-scale",
+    name = "space-map-rework-moon-size-scale",
     setting_type = "startup",
     default_value = 0.5,
     minimum_value = 0.05,
@@ -108,7 +107,7 @@ data:extend({
   },
   {
     type = "double-setting",
-    name = "custom-se-starmap-moon-orbit-scale",
+    name = "space-map-rework-moon-orbit-scale",
     setting_type = "startup",
     default_value = 0.25,
     minimum_value = 0.05,
@@ -120,7 +119,7 @@ data:extend({
   -- Минимальное расстояние между орбитами
   {
     type = "double-setting",
-    name = "custom-se-starmap-min-orbit-gap",
+    name = "space-map-rework-min-orbit-gap",
     setting_type = "startup",
     default_value = 3,
     minimum_value = 0,
@@ -131,7 +130,7 @@ data:extend({
   },
   {
     type = "double-setting",
-    name = "custom-se-starmap-star-orbit-gap",
+    name = "space-map-rework-star-orbit-gap",
     setting_type = "startup",
     default_value = 8,
     minimum_value = 0,
@@ -140,10 +139,10 @@ data:extend({
     localised_name = "Разрыв между орбитами планет вокруг звезды",
     localised_description = "Минимальное расстояние между соседними орбитами вокруг солнца (не лун). Больше = орбиты дальше друг от друга."
   },
-  -- Скорости вращения отдельно
+  -- Скорости вращения
   {
     type = "double-setting",
-    name = "custom-se-starmap-star-orbit-speed",
+    name = "space-map-rework-star-orbit-speed",
     setting_type = "startup",
     default_value = 0.0003,
     minimum_value = 0,
@@ -154,7 +153,7 @@ data:extend({
   },
   {
     type = "double-setting",
-    name = "custom-se-starmap-moon-orbit-speed",
+    name = "space-map-rework-moon-orbit-speed",
     setting_type = "startup",
     default_value = 0.0009,
     minimum_value = 0,
@@ -163,10 +162,10 @@ data:extend({
     localised_name = "Скорость вращения лун вокруг родителя",
     localised_description = "Отдельная скорость для спутников"
   },
-  -- Радиусы орбит отдельно (чтобы уменьшить дальность)
+  -- Лимиты радиусов орбит
   {
     type = "int-setting",
-    name = "custom-se-starmap-max-star-orbit",
+    name = "space-map-rework-max-star-orbit",
     setting_type = "startup",
     default_value = 400,
     minimum_value = 50,
@@ -177,7 +176,7 @@ data:extend({
   },
   {
     type = "int-setting",
-    name = "custom-se-starmap-max-moon-orbit",
+    name = "space-map-rework-max-moon-orbit",
     setting_type = "startup",
     default_value = 60,
     minimum_value = 5,
@@ -188,7 +187,7 @@ data:extend({
   },
   {
     type = "int-setting",
-    name = "custom-se-starmap-sun-size",
+    name = "space-map-rework-sun-size",
     setting_type = "startup",
     default_value = 7,
     minimum_value = 1,
@@ -196,5 +195,20 @@ data:extend({
     order = "f1",
     localised_name = "Размер солнца (Калидус)",
     localised_description = "Радиус жёлтого шара в центре"
+  }
+})
+
+-- Живой переключатель (runtime-global): меняется без перезапуска игры,
+-- применяется сразу (events.lua -> force_routes_rebuild).
+-- Дефолт-литерал — CONN_DISCOVERED_ONLY в control/constants.lua (синхронно).
+data:extend({
+  {
+    type = "bool-setting",
+    name = "space-map-rework-conn-discovered-only",
+    setting_type = "runtime-global",
+    default_value = true,
+    order = "z1",
+    localised_name = "Связи только между исследованными планетами",
+    localised_description = "Скрывает линии маршрутов, ведущих к неоткрытым телам. Луна считается открытой вместе с планетой-родителем."
   }
 })

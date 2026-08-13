@@ -1,5 +1,5 @@
 -- control/events.lua
--- Регистрация всех событий, чтобы control.lua был почти пустым
+-- Регистрация событий мода.
 
 script.on_init(function()
   storage.planets = {}
@@ -8,7 +8,14 @@ script.on_init(function()
   storage.info_visible = false
   storage.player_prev = {}
   storage.player_states = {}
-  get_or_create_surface()
+  -- Переименование мода: storage старого имени недоступно, а объекты рендера
+  -- на поверхности остаются сиротами (id хранились в storage). Поверхность
+  -- перед построением очищается от рендеров целиком (чужих объектов на ней
+  -- нет; маркер-сущности убирает destroy_star_system внутри rebuild).
+  local surf = get_or_create_surface()
+  if surf and surf.valid then
+    pcall(function() rendering.clear(surf) end)
+  end
   rebuild_star_system()
 end)
 
@@ -39,9 +46,8 @@ script.on_event(defines.events.on_player_created, function(e)
   if p then update_player_view_settings(p) end
 end)
 
--- После перезахода в сейв пересобираем систему: константы/настройки могли
--- поменяться, а on_configuration_changed при обычной загрузке НЕ срабатывает,
--- и storage.planets хранит старые радиусы.
+-- on_configuration_changed на обычной загрузке сейва не вызывается;
+-- пересборка откладывается на первый тик (в on_load storage недоступен).
 local rebuild_after_load = false
 script.on_load(function()
   rebuild_after_load = true
@@ -52,77 +58,183 @@ script.on_event(defines.events.on_tick, function(e)
     rebuild_after_load = false
     pcall(rebuild_star_system)
   end
-  -- рендер двигаем КАЖДЫЙ тик — иначе планеты и орбиты лун идут рывками
+  -- орбиты пересчитываются каждый тик
   update_orbits()
-  -- камера предпросмотра платформы и инфо-окно планеты при наведении
-  -- (оба снимают player.selected -> зелёной selection-рамки нет)
+  -- маршруты и маркеры летящих платформ (control/routes.lua)
+  update_routes_safe()
+  -- hover-окна (снимают player.selected -> зелёной рамки нет)
+  -- и окна закреплённых платформ
   for _, p in pairs(game.players) do
     pcall(update_platform_camera, p)
     pcall(update_planet_info, p)
+    pcall(update_pinned_follows, p)
   end
   if e.tick % 30 == 0 then
     for _, p in pairs(game.players) do update_player_view_settings(p) end
   end
-  -- всегда прогружать поверхность как радаром
+  -- поддержание чарта поверхности
   if e.tick % 180 == 0 then
     local surf = game.surfaces[SURFACE_NAME]
     if surf then pcall(function() chart_surface_as_radar(surf) end) end
   end
-  -- периодически обновлять треугольники платформ (прилёт/улёт без события)
+  -- сверка маркеров платформ (прилёт/улёт без события)
   if e.tick % 600 == 0 then
     pcall(refresh_platform_marks)
   end
 end)
 
--- Привязка к исследованиям УБРАНА: видимость планет от них не зависит.
--- Технологии открытия можно принудительно исследовать командой /starmap-open.
+-- Видимость планет от исследований не зависит. /starmap-open исследует
+-- технологии открытия принудительно.
 
--- Платформа сменила состояние (прилетела/улетела со стоянки)
 pcall(function()
   script.on_event(defines.events.on_space_platform_changed_state, function(e)
     pcall(refresh_platform_marks)
   end)
 end)
 
-script.on_event("custom-se-open-starmap", function(e)
+-- Накопленный урон платформ (storage.platform_damage, по индексу платформы):
+-- суммарного агрегата в API нет; урон по тайлам основания событий не даётся.
+-- Окно статистики (gui.lua) показывает живой дефицит прочности сущностей +
+-- урон тайлов (platform.damaged_tiles); этот счётчик — суммарная история с
+-- момента введения учёта, из окна не читается. Старые ключи не чистятся
+-- (индекс платформы уникален).
+script.on_event(defines.events.on_entity_damaged, function(e)
+  local ent = e.entity
+  if not (ent and ent.valid) then return end
+  local ok_p, platform = pcall(function() return ent.surface.platform end)
+  if not (ok_p and platform) then return end
+  local ok_v, valid = pcall(function() return platform.valid end)
+  if not (ok_v and valid) then return end
+  storage.platform_damage = storage.platform_damage or {}
+  local ok_i, idx = pcall(function() return platform.index end)
+  if not (ok_i and type(idx) == "number") then return end
+  storage.platform_damage[idx] = (storage.platform_damage[idx] or 0) + (e.final_damage_amount or 0)
+end)
+
+-- Граф связей перестраивается при открытии тел (исследование
+-- unlock-space-location) и при смене живой настройки фильтра
+-- исследованности (routes.lua, conn_discovered_only).
+pcall(function()
+  script.on_event(defines.events.on_research_finished, function(e)
+    local effs = nil
+    pcall(function() effs = e.research.prototype.effects end)
+    for _, eff in ipairs(effs or {}) do
+      if eff.type == "unlock-space-location" then
+        -- граф связей + перерисовка иконок тел (плейсхолдер -> иконка)
+        pcall(force_routes_rebuild)
+        pcall(rebuild_star_system)
+        break
+      end
+    end
+  end)
+end)
+pcall(function()
+  script.on_event(defines.events.on_runtime_mod_setting_changed, function(e)
+    if e and e.setting == "space-map-rework-conn-discovered-only" then
+      pcall(force_routes_rebuild)
+    end
+  end)
+end)
+
+-- on_selected_entity_changed: источник hover-данных.
+--  1) запись пробника (имя+позиция+тик) в storage.hover_probe;
+--  2) немедленное снятие выделения (selection-рамка не рисуется).
+-- clear_selected_entity() рекурсивно вызывает это же событие с selected=nil —
+-- пробник при nil НЕ стирается (иначе сгорает в тот же тик); его TTL
+-- отслеживает gui.lua по HOVER_PROBE_TTL. Движок перевыделяет сущность под
+-- курсором каждый тик: курсор на маркере -> пробник обновляется.
+pcall(function()
+  script.on_event(defines.events.on_selected_entity_changed, function(e)
+    local p = game.players[e.player_index]
+    if not (p and p.valid) then return end
+    storage.hover_probe = storage.hover_probe or {}
+    if not (p.surface and p.surface.name == SURFACE_NAME) then
+      storage.hover_probe[p.index] = nil
+      return
+    end
+    pcall(function()
+      local s = p.selected
+      if s and s.valid and starmap_is_marker_name(s.name) then
+        storage.hover_probe[p.index] = {name = s.name, x = s.position.x, y = s.position.y, tick = game.tick}
+        p.clear_selected_entity()
+      end
+      -- selected == nil (реентерабельный вызов или уход курсора): не трогаем.
+    end)
+  end)
+end)
+
+script.on_event("space-map-rework-open-starmap", function(e)
   local p = game.players[e.player_index]
   teleport_to_starmap(p, true)
 end)
 
-script.on_event("custom-se-toggle-info", function(e)
+script.on_event("space-map-rework-toggle-info", function(e)
   local p = game.players[e.player_index]
   toggle_info_cards(p)
 end)
 
-script.on_event("custom-se-left-click", function(e)
+-- SHIFT+P: закрепить/открепить наведённую платформу (паркованную или летящую)
+script.on_event("space-map-rework-pin-platform", function(e)
+  local p = game.players[e.player_index]
+  if not (p and p.valid) then return end
+  local hit = starmap_hovered_platform(p)
+  if hit then
+    toggle_pin_platform(p, hit)
+  elseif p.surface and p.surface.name == SURFACE_NAME then
+    p.print("[space-map-rework] Наведите курсор на маркер платформы, чтобы закрепить её")
+  end
+end)
+
+-- кнопка X следящего окна закрепа -> открепить
+script.on_event(defines.events.on_gui_click, function(e)
+  local el = e.element
+  if not (el and el.valid) then return end
+  if el.name == "space-map-rework-pin-remove" then
+    local p = game.players[e.player_index]
+    local tags = el.tags or {}
+    if p and p.valid and tags.pin_i then
+      local list = storage.pinned_platforms and storage.pinned_platforms[p.index]
+      if list and list[tags.pin_i] then
+        local nm = list[tags.pin_i].name
+        table.remove(list, tags.pin_i)
+        p.print("[space-map-rework] Платформа «" .. (nm or "?") .. "» ОТКРЕПЛЕНА")
+        pcall(destroy_pinned_follows, p)
+      end
+    end
+  end
+end)
+
+script.on_event("space-map-rework-left-click", function(e)
   local p = game.players[e.player_index]
   if p and p.surface.name ~= SURFACE_NAME then return end
   local cp = e.cursor_position or (p and p.position)
   handle_planet_click(p, cp)
 end)
 
-script.on_event("custom-se-right-click", function(e)
+script.on_event("space-map-rework-right-click", function(e)
   local p = game.players[e.player_index]
   if p and p.surface.name ~= SURFACE_NAME then return end
   local cp = e.cursor_position or (p and p.position)
   handle_planet_click(p, cp)
 end)
 
-commands.add_command("starmap", "Телепорт на SE-карту", function(e)
+reg_starmap_cmd({"starmap", "starmap-test"}, "Телепорт на звёздную карту", function(e)
   local p = game.players[e.player_index]
   if p then teleport_to_starmap(p, false) end
 end)
 
-commands.add_command("starmap-rebuild", "Пересобрать систему", function(e)
+reg_starmap_cmd({"starmap-rebuild", "starmap-test-rebuild"}, "Пересобрать систему", function(e)
   rebuild_star_system()
+  -- граф маршрутов — принудительно: состав тел мог не измениться,
+  -- а правила/эксклюзивные связи/прототипы — да (после обновления мода)
+  if force_routes_rebuild then pcall(force_routes_rebuild) end
   local p = e.player_index and game.players[e.player_index] or nil
   if p then
-    p.print("[custom-se-starmap] Пересобрано: " .. (#storage.planets) .. " тел")
+    p.print("[space-map-rework] Пересобрано: " .. (#storage.planets) .. " тел")
   end
 end)
 
--- Диагностика: что мод видит в runtime (писать и в чат, и в лог)
-commands.add_command("starmap-debug", "Диагностика звездной карты", function(e)
+reg_starmap_cmd({"starmap-debug", "starmap-test-debug"}, "Диагностика звездной карты", function(e)
   local p = e.player_index and game.players[e.player_index] or nil
   local function say(s)
     if p then p.print(s) end
@@ -157,14 +269,14 @@ commands.add_command("starmap-debug", "Диагностика звездной �
 
   local ic_n = 0
   local ok_i = pcall(function()
-    local d = prototypes.mod_data["custom-se-starmap-icons"].data
+    local d = prototypes.mod_data["space-map-rework-icons"].data
     if type(d) == "table" then for _ in pairs(d) do ic_n = ic_n + 1 end end
   end)
   say("[starmap-debug] icons mod-data: " .. ic_n .. (ok_i and "" or " ERROR reading mod-data"))
 
   local od_n = 0
   pcall(function()
-    local d = prototypes.mod_data["custom-se-starmap-orbits"].data
+    local d = prototypes.mod_data["space-map-rework-orbits"].data
     if type(d) == "table" then for _ in pairs(d) do od_n = od_n + 1 end end
   end)
   say("[starmap-debug] orbits mod-data: " .. od_n)
@@ -172,13 +284,13 @@ commands.add_command("starmap-debug", "Диагностика звездной �
   local surf = game.surfaces[SURFACE_NAME]
   say("[starmap-debug] starmap surface: " .. (surf and "exists" or "MISSING"))
 
-  -- Проверка, какие формы SpritePath валидны на этой сборке
+  -- валидация форм SpritePath на текущей сборке
   local test_name = planets_sample[1] or "nauvis"
   local forms = {
     "space-location/" .. test_name,
     "planet/" .. test_name,
-    "entity/custom-se-marker-" .. test_name,
-    "entity/custom-se-planet-marker",
+    "entity/space-map-rework-marker-" .. test_name,
+    "entity/space-map-rework-planet-marker",
     "item/satellite",
     "__space-age__/graphics/icons/starmap-planet-" .. test_name .. ".png",
   }
@@ -189,7 +301,7 @@ commands.add_command("starmap-debug", "Диагностика звездной �
   end
   say("[starmap-debug] sprite paths: " .. table.concat(parts, " ; "))
 
-  -- Платформы: сколько стоит на каких локациях (по всем силам)
+  -- припаркованные платформы по локациям (все силы)
   local plat_counts, plat_total = {}, 0
   for _, force in pairs(game.forces) do
     if force.valid then
@@ -218,16 +330,16 @@ commands.add_command("starmap-debug", "Диагностика звездной �
   say("[starmap-debug] platform triangles drawn: " .. tri)
 end)
 
-commands.add_command("starmap-back", "Вернуться", function(e)
+reg_starmap_cmd({"starmap-back", "starmap-test-back"}, "Вернуться", function(e)
   local p = game.players[e.player_index]
   if p and storage.player_prev and storage.player_prev[p.index] then
     teleport_to_starmap(p, true)
   end
 end)
 
--- Открытие планет: /starmap-open — все планеты; /starmap-open <имя> — одну.
--- Технологии найдены сканом data.raw в data-final-fixes.lua (mod-data карта).
-commands.add_command("starmap-open", "Открыть планеты: /starmap-open — все; /starmap-open <имя> — одну", function(e)
+-- /starmap-open — все планеты; /starmap-open <имя> — одну. Карта
+-- планета->технология собрана в data-final-fixes.lua (mod-data).
+reg_starmap_cmd({"starmap-open", "starmap-test-open"}, "Открыть планеты: /starmap-open — все; /starmap-open <имя> — одну", function(e)
   local player = e.player_index and game.players[e.player_index] or nil
   local force = player and player.force or game.forces["player"]
   if not force then return end
@@ -259,9 +371,9 @@ commands.add_command("starmap-open", "Открыть планеты: /starmap-op
     local ok_flag = research_tech(tech_name)
     if player then
       if ok_flag then
-        player.print("[custom-se-starmap] Открыто: " .. param .. " (технология " .. tech_name .. ")")
+        player.print("[space-map-rework] Открыто: " .. param .. " (технология " .. tech_name .. ")")
       else
-        player.print("[custom-se-starmap] Не удалось открыть «" .. param .. "» — технология «" .. tech_name .. "» не найдена или уже исследована")
+        player.print("[space-map-rework] Не удалось открыть «" .. param .. "» — технология «" .. tech_name .. "» не найдена или уже исследована")
       end
     end
   else
@@ -269,10 +381,10 @@ commands.add_command("starmap-open", "Открыть планеты: /starmap-op
       research_tech(tech_name)
     end
     if player then
-      player.print("[custom-se-starmap] Открыты все планеты. Технологий в карте: "
+      player.print("[space-map-rework] Открыты все планеты. Технологий в карте: "
         .. #data.techs .. ", новых исследовано: " .. researched_count)
     end
-    log("[custom-se-starmap] /starmap-open: force=" .. force.name .. ", techs=" .. #data.techs .. ", new=" .. researched_count)
+    log("[space-map-rework] /starmap-open: force=" .. force.name .. ", techs=" .. #data.techs .. ", new=" .. researched_count)
   end
 end)
 

@@ -1,8 +1,6 @@
--- Опциональный файл с орбитами (если хотите задать вручную / из внешнего генератора).
--- Основной источник орбит - прототип mod-data "custom-se-starmap-orbits",
--- который заполняется в data-final-fixes.lua из прототипов (PlanetsLib).
--- Формат: [planet_name] = {parent="nauvis", parent_type="planet", distance=1.6, orientation=0.75}
+-- Опциональный переопределитель орбит (ручной / внешний генератор).
+-- Основной источник — mod-data "space-map-rework-orbits" (data-final-fixes.lua).
+-- Формат: [planet_name] = {parent, parent_type, distance, orientation}
 return {
-  -- Пример:
-  -- ["muluna"] = {parent="nauvis", parent_type="planet", distance=1.6, orientation=0.75},
+  -- пример: ["muluna"] = {parent="nauvis", parent_type="planet", distance=1.6, orientation=0.75},
 }
